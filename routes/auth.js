@@ -39,8 +39,10 @@ router.post('/login', async (req, res) => {
 
 router.get('/discord', (req, res) => {
   try {
+    const { state } = req.query;
+    if (!state) return res.status(400).json({ message: 'Missing state parameter' });
     const redirectUri = encodeURIComponent(`${process.env.API_URL}/auth/discord/callback`);
-    const oauthUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=identify`;
+    const oauthUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=identify&state=${state}`;
     console.log('Redirecting to Discord OAuth:', oauthUrl);
     res.redirect(oauthUrl);
   } catch (error) {
@@ -51,9 +53,21 @@ router.get('/discord', (req, res) => {
 
 router.get('/discord/callback', async (req, res) => {
   try {
-    const { code } = req.query;
+    const { code, state } = req.query;
     if (!code) return res.status(400).json({ message: 'Missing authorization code' });
+    if (!state) return res.status(400).json({ message: 'Missing state parameter' });
 
+    // Verify JWT token from state
+    let userId;
+    try {
+      const decoded = jwt.verify(decodeURIComponent(state), process.env.JWT_SECRET);
+      userId = decoded.userId;
+    } catch (error) {
+      console.error('JWT verification error:', error);
+      return res.redirect('https://gambling-website-frontend.vercel.app/profile?error=Invalid%20token');
+    }
+
+    // Exchange code for access token
     const tokenResponse = await axios.post(
       'https://discord.com/api/oauth2/token',
       new URLSearchParams({
@@ -67,20 +81,24 @@ router.get('/discord/callback', async (req, res) => {
     );
 
     const { access_token } = tokenResponse.data;
+
+    // Get Discord user info
     const userResponse = await axios.get('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${access_token}` },
     });
 
     const discordId = userResponse.data.id;
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) return res.status(401).json({ message: 'Unauthorized: No JWT token provided' });
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    await User.findByIdAndUpdate(decoded.userId, { discordId });
-    res.redirect('https://gambling-website-frontend.vercel.app/profile');
+    // Update user with Discord ID
+    const user = await User.findByIdAndUpdate(userId, { discordId }, { new: true });
+    if (!user) {
+      return res.redirect('https://gambling-website-frontend.vercel.app/profile?error=User%20not%20found');
+    }
+
+    res.redirect('https://gambling-website-frontend.vercel.app/profile?success=Discord%20connected');
   } catch (error) {
     console.error('Discord OAuth callback error:', error.response?.data || error.message);
-    res.status(500).json({ message: 'Discord auth failed' });
+    res.redirect('https://gambling-website-frontend.vercel.app/profile?error=Discord%20auth%20failed');
   }
 });
 
