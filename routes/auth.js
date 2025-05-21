@@ -87,10 +87,18 @@ router.get('/discord/callback', async (req, res) => {
       headers: { Authorization: `Bearer ${access_token}` },
     });
 
-    const discordId = userResponse.data.id;
+    const { id: discordId, username, discriminator, avatar } = userResponse.data;
+    const discordName = discriminator === '0' ? username : `${username}#${discriminator}`;
+    const avatarUrl = avatar
+      ? `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png`
+      : 'https://cdn.discordapp.com/embed/avatars/0.png';
 
-    // Update user with Discord ID
-    const user = await User.findByIdAndUpdate(userId, { discordId }, { new: true });
+    // Update user with Discord info
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { discordId, discordName, discordAvatar: avatarUrl },
+      { new: true }
+    );
     if (!user) {
       return res.redirect('https://gambling-website-frontend.vercel.app/profile?error=User%20not%20found');
     }
