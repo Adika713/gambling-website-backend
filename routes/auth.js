@@ -89,9 +89,17 @@ router.get('/discord/callback', async (req, res) => {
 
     const { id: discordId, username, discriminator, avatar } = userResponse.data;
     const discordName = discriminator === '0' ? username : `${username}#${discriminator}`;
-    const avatarUrl = avatar
-      ? `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png`
+    let avatarUrl = avatar
+      ? `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png?size=128`
       : 'https://cdn.discordapp.com/embed/avatars/0.png';
+    
+    // Validate avatar URL
+    try {
+      await axios.head(avatarUrl);
+    } catch (error) {
+      console.warn(`Avatar URL invalid for ${discordId}: ${avatarUrl}, using default`);
+      avatarUrl = 'https://cdn.discordapp.com/embed/avatars/0.png';
+    }
 
     // Update user with Discord info
     const user = await User.findByIdAndUpdate(
@@ -100,9 +108,11 @@ router.get('/discord/callback', async (req, res) => {
       { new: true }
     );
     if (!user) {
+      console.error('User not found for ID:', userId);
       return res.redirect('https://gambling-website-frontend.vercel.app/profile?error=User%20not%20found');
     }
 
+    console.log('Updated user with Discord info:', { discordId, discordName, avatarUrl });
     res.redirect('https://gambling-website-frontend.vercel.app/profile?success=Discord%20connected');
   } catch (error) {
     console.error('Discord OAuth callback error:', error.response?.data || error.message);
