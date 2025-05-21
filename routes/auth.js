@@ -36,24 +36,26 @@ router.post('/login', async (req, res) => {
 });
 
 router.get('/discord', (req, res) => {
-  const redirectUri = encodeURIComponent(`${process.env.API_URL}/api/auth/discord/callback`);
+  const redirectUri = encodeURIComponent(`${process.env.API_URL}/auth/discord/callback`);
   res.redirect(
     `https://discord.com/api/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=identify`
   );
 });
 
-router.get('/discord/callback', async (req, res) => {
+router.get('/auth/discord/callback', async (req, res) => {
   try {
     const { code } = req.query;
-    const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', {
-      client_id: process.env.DISCORD_CLIENT_ID,
-      client_secret: process.env.DISCORD_CLIENT_SECRET,
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: `${process.env.API_URL}/api/auth/discord/callback`,
-    }, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
+    const tokenResponse = await axios.post(
+      'https://discord.com/api/oauth2/token',
+      new URLSearchParams({
+        client_id: process.env.DISCORD_CLIENT_ID,
+        client_secret: process.env.DISCORD_CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: `${process.env.API_URL}/auth/discord/callback`,
+      }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
 
     const { access_token } = tokenResponse.data;
     const userResponse = await axios.get('https://discord.com/api/users/@me', {
@@ -62,11 +64,12 @@ router.get('/discord/callback', async (req, res) => {
 
     const discordId = userResponse.data.id;
     const token = req.headers.authorization?.split(' ')[1];
-    if (!token) return res.status(401).json({ message: 'Unauthorized' });
+    if (!token) return res.status(401).json({ message: 'Unauthorized: No JWT token provided' });
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     await User.findByIdAndUpdate(decoded.userId, { discordId });
     res.redirect('https://<your-vercel-domain>/profile');
   } catch (error) {
+    console.error('Discord OAuth error:', error.response?.data || error.message);
     res.status(500).json({ message: 'Discord auth failed' });
   }
 });
