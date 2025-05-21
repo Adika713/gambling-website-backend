@@ -19,6 +19,7 @@ mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTop
   .catch(err => console.error('MongoDB connection error:', err));
 
 app.use('/api/auth', authRoutes);
+app.use('/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/game', gameRoutes);
 

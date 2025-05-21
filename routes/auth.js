@@ -17,6 +17,7 @@ router.post('/register', async (req, res) => {
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
     res.status(201).json({ token });
   } catch (error) {
+    console.error('Register error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -31,20 +32,28 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
     res.json({ token });
   } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
 router.get('/discord', (req, res) => {
-  const redirectUri = encodeURIComponent(`${process.env.API_URL}/auth/discord/callback`);
-  res.redirect(
-    `https://discord.com/api/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=identify`
-  );
+  try {
+    const redirectUri = encodeURIComponent(`${process.env.API_URL}/auth/discord/callback`);
+    const oauthUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=identify`;
+    console.log('Redirecting to Discord OAuth:', oauthUrl);
+    res.redirect(oauthUrl);
+  } catch (error) {
+    console.error('Discord OAuth redirect error:', error);
+    res.status(500).json({ message: 'Failed to initiate Discord OAuth' });
+  }
 });
 
-router.get('/auth/discord/callback', async (req, res) => {
+router.get('/discord/callback', async (req, res) => {
   try {
     const { code } = req.query;
+    if (!code) return res.status(400).json({ message: 'Missing authorization code' });
+
     const tokenResponse = await axios.post(
       'https://discord.com/api/oauth2/token',
       new URLSearchParams({
@@ -65,11 +74,12 @@ router.get('/auth/discord/callback', async (req, res) => {
     const discordId = userResponse.data.id;
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ message: 'Unauthorized: No JWT token provided' });
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     await User.findByIdAndUpdate(decoded.userId, { discordId });
-    res.redirect('https://<your-vercel-domain>/profile');
+    res.redirect('https://gambling-website-frontend.vercel.app/profile');
   } catch (error) {
-    console.error('Discord OAuth error:', error.response?.data || error.message);
+    console.error('Discord OAuth callback error:', error.response?.data || error.message);
     res.status(500).json({ message: 'Discord auth failed' });
   }
 });
