@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const router = express.Router();
 
-const authMiddleware = (req, res, next) => {
+const authenticate = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ message: 'Unauthorized' });
   try {
@@ -15,130 +15,223 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-const deck = [
-  { face: '2', value: 2 }, { face: '3', value: 3 }, { face: '4', value: 4 },
-  { face: '5', value: 5 }, { face: '6', value: 6 }, { face: '7', value: 7 },
-  { face: '8', value: 8 }, { face: '9', value: 9 }, { face: '10', value: 10 },
-  { face: 'J', value: 10 }, { face: 'Q', value: 10 }, { face: 'K', value: 10 },
-  { face: 'A', value: 11 },
-].flatMap(card => ['♠', '♣', '♥', '♦'].map(suit => ({ ...card, face: `${card.face}${suit}` })));
-
-const shuffle = (array) => {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
+const dealCard = () => {
+  const suits = ['♠', '♥', '♣', '♦'];
+  const values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+  const suit = suits[Math.floor(Math.random() * suits.length)];
+  const value = values[Math.floor(Math.random() * values.length)];
+  return `${value}${suit}`;
 };
 
 const calculateHandValue = (hand) => {
-  let value = hand.reduce((sum, card) => sum + card.value, 0);
-  let aces = hand.filter(card => card.face.startsWith('A')).length;
-  while (value > 21 && aces > 0) {
-    value -= 10;
-    aces--;
+  let value = 0;
+  let aces = 0;
+  for (const card of hand) {
+    const rank = card.slice(0, -1);
+    if (['J', 'Q', 'K'].includes(rank)) value += 10;
+    else if (rank === 'A') aces += 1;
+    else value += parseInt(rank);
+  }
+  for (let i = 0; i < aces; i++) {
+    if (value + 11 <= 21) value += 11;
+    else value += 1;
   }
   return value;
 };
 
-router.post('/blackjack', authMiddleware, async (req, res) => {
+router.get('/blackjack/state', authenticate, async (req, res) => {
   try {
-    const { action, bet } = req.body;
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
-
-    if (action === 'deal') {
-      if (bet > user.balance) return res.status(400).json({ message: 'Insufficient balance' });
-      user.balance -= bet;
-      const shuffledDeck = shuffle([...deck]);
-      const playerCards = [shuffledDeck.pop(), shuffledDeck.pop()];
-      const dealerCards = [shuffledDeck.pop(), shuffledDeck.pop()];
-      user.gameState = { playerCards, dealerCards, bet, deck: shuffledDeck };
-      await user.save();
-      return res.json({
-        playerCards,
-        dealerCards: [dealerCards[0], { face: 'hidden', value: '?' }],
-        balance: user.balance,
-        status: 'playing',
-      });
-    }
-
-    if (!user.gameState) return res.status(400).json({ message: 'No active game' });
-
-    if (action === 'hit') {
-      const { playerCards, dealerCards, bet, deck } = user.gameState;
-      playerCards.push(deck.pop());
-      const playerValue = calculateHandValue(playerCards);
-      if (playerValue > 21) {
-        user.gameHistory.push({ game: 'blackjack', bet, outcome: 'Loss', timestamp: new Date() });
-        user.gameState = null;
-        await user.save();
-        return res.json({
-          playerCards,
-          dealerCards,
-          balance: user.balance,
-          status: 'bust',
-          outcome: 'You busted! Game over.',
-        });
-      }
-      user.gameState.playerCards = playerCards;
-      user.gameState.deck = deck;
-      await user.save();
-      return res.json({ playerCards, dealerCards: [dealerCards[0], { face: 'hidden', value: '?' }], status: 'playing' });
-    }
-
-    if (action === 'stand') {
-      const { playerCards, dealerCards, bet, deck } = user.gameState;
-      let dealerValue = calculateHandValue(dealerCards);
-      while (dealerValue < 17) {
-        dealerCards.push(deck.pop());
-        dealerValue = calculateHandValue(dealerCards);
-      }
-      const playerValue = calculateHandValue(playerCards);
-      let outcome = '';
-      if (dealerValue > 21 || playerValue > dealerValue) {
-        outcome = 'You win!';
-        user.balance += bet * 2;
-      } else if (playerValue < dealerValue) {
-        outcome = 'Dealer wins!';
-      } else {
-        outcome = 'Push!';
-        user.balance += bet;
-      }
-      user.gameHistory.push({ game: 'blackjack', bet, outcome, timestamp: new Date() });
-      user.gameState = null;
-      await user.save();
-      return res.json({ playerCards, dealerCards, balance: user.balance, status: 'over', outcome });
-    }
-
-    res.status(400).json({ message: 'Invalid action' });
+    const activeGame = user.gameHistory.find(
+      (game) => game.game === 'Blackjack' && game.status === 'active'
+    );
+    if (!activeGame) return res.status(200).json(null);
+    res.json({
+      playerHand: activeGame.playerHand,
+      dealerHand: activeGame.dealerHand,
+      playerValue: calculateHandValue(activeGame.playerHand),
+      dealerValue: calculateHandValue(activeGame.dealerHand),
+      bet: activeGame.bet,
+      status: activeGame.status,
+      outcome: activeGame.outcome,
+    });
   } catch (error) {
+    console.error('Fetch blackjack state error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-router.post('/roulette', authMiddleware, async (req, res) => {
+router.post('/blackjack/deal', authenticate, async (req, res) => {
   try {
-    const { betAmount, betType } = req.body;
+    const { bet } = req.body;
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
-    if (betAmount > user.balance) return res.status(400).json({ message: 'Insufficient balance' });
-
-    user.balance -= betAmount;
-    const result = Math.floor(Math.random() * 37); // 0-36
-    const isRed = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36].includes(result);
-    let outcome = 'Loss';
-    if ((betType === 'red' && isRed) || (betType === 'black' && !isRed && result !== 0)) {
-      user.balance += betAmount * 2;
-      outcome = 'Win!';
-    } else if (betType === 'number' && Number(req.body.number) === result) {
-      user.balance += betAmount * 36;
-      outcome = 'Win!';
+    if (bet <= 0 || bet > user.balance) {
+      return res.status(400).json({ message: 'Invalid bet amount' });
     }
-    user.gameHistory.push({ game: 'roulette', bet: betAmount, outcome, timestamp: new Date() });
+
+    const playerHand = [dealCard(), dealCard()];
+    const dealerHand = [dealCard(), dealCard()];
+    const playerValue = calculateHandValue(playerHand);
+    const dealerValue = calculateHandValue(dealerHand);
+
+    user.balance -= bet;
+    user.gameHistory.push({
+      game: 'Blackjack',
+      bet,
+      playerHand,
+      dealerHand,
+      status: 'active',
+      outcome: null,
+    });
+
     await user.save();
-    res.json({ result: result === 0 ? '0' : isRed ? `${result} (Red)` : `${result} (Black)`, outcome, balance: user.balance });
+
+    res.json({
+      playerHand,
+      dealerHand,
+      playerValue,
+      dealerValue,
+      bet,
+      status: 'active',
+      outcome: null,
+    });
   } catch (error) {
+    console.error('Blackjack deal error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/blackjack/hit', authenticate, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const activeGame = user.gameHistory.find(
+      (game) => game.game === 'Blackjack' && game.status === 'active'
+    );
+    if (!activeGame) return res.status(400).json({ message: 'No active game' });
+
+    activeGame.playerHand.push(dealCard());
+    const playerValue = calculateHandValue(activeGame.playerHand);
+
+    if (playerValue > 21) {
+      activeGame.status = 'completed';
+      activeGame.outcome = 'Player busts';
+      await user.save();
+      return res.json({
+        playerHand: activeGame.playerHand,
+        dealerHand: activeGame.dealerHand,
+        playerValue,
+        dealerValue: calculateHandValue(activeGame.dealerHand),
+        bet: activeGame.bet,
+        status: 'completed',
+        outcome: 'Player busts',
+      });
+    }
+
+    await user.save();
+    res.json({
+      playerHand: activeGame.playerHand,
+      dealerHand: activeGame.dealerHand,
+      playerValue,
+      dealerValue: calculateHandValue(activeGame.dealerHand),
+      bet: activeGame.bet,
+      status: 'active',
+      outcome: null,
+    });
+  } catch (error) {
+    console.error('Blackjack hit error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/blackjack/stand', authenticate, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const activeGame = user.gameHistory.find(
+      (game) => game.game === 'Blackjack' && game.status === 'active'
+    );
+    if (!activeGame) return res.status(400).json({ message: 'No active game' });
+
+    while (calculateHandValue(activeGame.dealerHand) < 17) {
+      activeGame.dealerHand.push(dealCard());
+    }
+    const playerValue = calculateHandValue(activeGame.playerHand);
+    const dealerValue = calculateHandValue(activeGame.dealerHand);
+
+    let outcome;
+    if (dealerValue > 21) {
+      user.balance += activeGame.bet * 2;
+      outcome = 'Dealer busts';
+    } else if (playerValue > dealerValue) {
+      user.balance += activeGame.bet * 2;
+      outcome = 'Player wins';
+    } else if (playerValue < dealerValue) {
+      outcome = 'Dealer wins';
+    } else {
+      user.balance += activeGame.bet;
+      outcome = 'Push';
+    }
+
+    activeGame.status = 'completed';
+    activeGame.outcome = outcome;
+    await user.save();
+
+    res.json({
+      playerHand: activeGame.playerHand,
+      dealerHand: activeGame.dealerHand,
+      playerValue,
+      dealerValue,
+      bet: activeGame.bet,
+      status: 'completed',
+      outcome,
+    });
+  } catch (error) {
+    console.error('Blackjack stand error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/roulette/spin', authenticate, async (req, res) => {
+  try {
+    const { bet, choice } = req.body;
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (bet <= 0 || bet > user.balance) {
+      return res.status(400).json({ message: 'Invalid bet amount' });
+    }
+    if (!['red', 'black', 'green'].includes(choice)) {
+      return res.status(400).json({ message: 'Invalid choice' });
+    }
+
+    const number = Math.floor(Math.random() * 37);
+    const color = number === 0 ? 'green' : number % 2 === 0 ? 'red' : 'black';
+    let outcome = choice === color ? 'Win' : 'Loss';
+
+    user.balance -= bet;
+    if (outcome === 'Win') {
+      const multiplier = choice === 'green' ? 14 : 2;
+      user.balance += bet * multiplier;
+    }
+
+    user.gameHistory.push({
+      game: 'Roulette',
+      bet,
+      outcome: `${outcome} (${choice} on ${number} ${color})`,
+    });
+
+    await user.save();
+
+    res.json({
+      number,
+      color,
+      outcome,
+      balance: user.balance,
+    });
+  } catch (error) {
+    console.error('Roulette spin error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
