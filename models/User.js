@@ -2,19 +2,11 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
 const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
+  discordName: String,
   email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  balance: { type: Number, default: 1000 },
-  discordId: { type: String, unique: true, sparse: true },
-  discordName: { type: String },
-  discordAvatar: { type: String },
-  gameHistory: [{
-    game: String,
-    bet: Number,
-    outcome: String,
-    timestamp: { type: Date, default: Date.now }
-  }]
+  password: String,
+  balance: { type: Number, default: 0 },
+  gameHistory: [{ game: String, amount: Number, outcome: String, date: Date }],
 });
 
 userSchema.pre('save', async function (next) {
