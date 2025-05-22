@@ -12,7 +12,7 @@ const authMiddleware = (req, res, next) => {
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('authMiddleware: Token decoded:', { id: decoded.id, email: decoded.email });
+    console.log('authMiddleware: Token decoded:', { id: decoded.id, discordId: decoded.discordId, email: decoded.email });
     req.user = decoded;
     next();
   } catch (err) {
@@ -24,10 +24,15 @@ const authMiddleware = (req, res, next) => {
 // GET /users/me - Get current user
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    console.log('GET /users/me: Fetching user with ID:', req.user.id);
-    const user = await User.findById(req.user.id).select('-password');
+    console.log('GET /users/me: Fetching user with ID:', req.user.id, 'or discordId:', req.user.discordId);
+    let user;
+    if (req.user.discordId) {
+      user = await User.findOne({ discordId: req.user.discordId }).select('-password');
+    } else {
+      user = await User.findById(req.user.id).select('-password');
+    }
     if (!user) {
-      console.log('GET /users/me: User not found for ID:', req.user.id);
+      console.log('GET /users/me: User not found for ID:', req.user.id, 'or discordId:', req.user.discordId);
       return res.status(404).json({ message: 'User not found' });
     }
     console.log('GET /users/me: User found:', { email: user.email, balance: user.balance });
