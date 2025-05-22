@@ -8,6 +8,10 @@ const User = require('../models/User');
 router.post('/register', async (req, res) => {
   const { email, password, username, discordId } = req.body;
   try {
+    if (!email || !password || !username) {
+      console.log('Register: Missing required fields:', { email, username, hasPassword: !!password });
+      return res.status(400).json({ message: 'Email, password, and username are required' });
+    }
     let user = await User.findOne({ email });
     if (user) {
       console.log('Register: User already exists:', email);
@@ -26,7 +30,13 @@ router.post('/register', async (req, res) => {
     const token = jwt.sign({ id: user._id, discordId, email }, process.env.JWT_SECRET, { expiresIn: '1h' });
     res.json({ token });
   } catch (err) {
-    console.error('Register error:', err.message);
+    console.error('Register error:', err.message, err.stack);
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ message: 'Invalid user data', errors: err.errors });
+    }
+    if (err.code === 11000) {
+      return res.status(400).json({ message: 'Duplicate email or Discord ID' });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -34,6 +44,10 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
   try {
+    if (!email || !password) {
+      console.log('Login: Missing required fields:', { email, hasPassword: !!password });
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
     const user = await User.findOne({ email });
     if (!user) {
       console.log('Login: User not found:', email);
@@ -48,19 +62,17 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign({ id: user._id, discordId: user.discordId, email }, process.env.JWT_SECRET, { expiresIn: '1h' });
     res.json({ token });
   } catch (err) {
-    console.error('Login error:', err.message);
+    console.error('Login error:', err.message, err.stack);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Discord OAuth: Initiate
 router.get('/discord', (req, res) => {
   const discordAuthUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent('https://gambling-website-backend.onrender.com/auth/discord/callback')}&response_type=code&scope=identify%20email`;
   console.log('Redirecting to Discord OAuth:', discordAuthUrl);
   res.redirect(discordAuthUrl);
 });
 
-// Discord OAuth: Callback
 router.get('/discord/callback', async (req, res) => {
   const { code } = req.query;
   if (!code) {
@@ -68,7 +80,6 @@ router.get('/discord/callback', async (req, res) => {
     return res.status(400).json({ message: 'No code provided' });
   }
   try {
-    // Exchange code for access token
     const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', new URLSearchParams({
       client_id: process.env.DISCORD_CLIENT_ID,
       client_secret: process.env.DISCORD_CLIENT_SECRET,
@@ -82,7 +93,6 @@ router.get('/discord/callback', async (req, res) => {
     const { access_token } = tokenResponse.data;
     console.log('Discord callback: Access token received');
 
-    // Fetch Discord user data
     const userResponse = await axios.get('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${access_token}` },
     });
@@ -90,7 +100,6 @@ router.get('/discord/callback', async (req, res) => {
     const discordAvatar = avatar ? `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png` : null;
     console.log('Discord callback: User data:', { discordId, username, email, discordAvatar });
 
-    // Find or create user
     let user = await User.findOne({ discordId });
     if (!user) {
       user = new User({
@@ -111,14 +120,11 @@ router.get('/discord/callback', async (req, res) => {
       console.log('Discord callback: User updated:', { _id: user._id, discordId, email });
     }
 
-    // Generate JWT
     const token = jwt.sign({ id: user._id, discordId, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
     console.log('Discord callback: JWT generated for:', discordId);
-
-    // Redirect to frontend profile with token
     res.redirect(`https://gambling-website-frontend.vercel.app/profile?token=${token}`);
   } catch (err) {
-    console.error('Discord callback error:', err.response?.data || err.message);
+    console.error('Discord callback error:', err.response?.data || err.message, err.stack);
     res.status(500).json({ message: 'Discord authentication failed' });
   }
 });
