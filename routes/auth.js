@@ -15,7 +15,14 @@ router.post('/register', async (req, res) => {
     let user = await User.findOne({ email });
     if (user) {
       console.log('Register: User already exists:', email);
-      return res.status(400).json({ message: 'User already exists' });
+      return res.status(400).json({ message: 'Email already in use' });
+    }
+    if (discordId) {
+      user = await User.findOne({ discordId });
+      if (user) {
+        console.log('Register: Discord ID already in use:', discordId);
+        return res.status(400).json({ message: 'Discord ID already in use' });
+      }
     }
     user = new User({
       discordId,
@@ -35,7 +42,10 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Invalid user data', errors: err.errors });
     }
     if (err.code === 11000) {
-      return res.status(400).json({ message: 'Duplicate email or Discord ID' });
+      const field = err.keyValue?.email ? 'email' : 'Discord ID';
+      const value = err.keyValue?.email || err.keyValue?.discordId;
+      console.log(`Register: Duplicate ${field}:`, value);
+      return res.status(400).json({ message: `Duplicate ${field}: ${value}` });
     }
     res.status(500).json({ message: 'Server error' });
   }
