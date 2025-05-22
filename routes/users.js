@@ -7,13 +7,16 @@ const User = require('../models/User'); // Adjust path to your User model
 const authMiddleware = (req, res, next) => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
   if (!token) {
+    console.log('authMiddleware: No token provided');
     return res.status(401).json({ message: 'No token provided' });
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('authMiddleware: Token decoded:', { id: decoded.id, email: decoded.email });
     req.user = decoded;
     next();
   } catch (err) {
+    console.error('authMiddleware: Token verification failed:', err.message);
     res.status(401).json({ message: 'Invalid token' });
   }
 };
@@ -21,10 +24,13 @@ const authMiddleware = (req, res, next) => {
 // GET /users/me - Get current user
 router.get('/me', authMiddleware, async (req, res) => {
   try {
+    console.log('GET /users/me: Fetching user with ID:', req.user.id);
     const user = await User.findById(req.user.id).select('-password');
     if (!user) {
+      console.log('GET /users/me: User not found for ID:', req.user.id);
       return res.status(404).json({ message: 'User not found' });
     }
+    console.log('GET /users/me: User found:', { email: user.email, balance: user.balance });
     res.json({
       discordName: user.discordName,
       email: user.email,
@@ -32,7 +38,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       gameHistory: user.gameHistory || [],
     });
   } catch (err) {
-    console.error('Error in /users/me:', err);
+    console.error('GET /users/me: Error:', err.message);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -46,7 +52,7 @@ router.get('/leaderboard', async (req, res) => {
       .select('discordName balance');
     res.json(users);
   } catch (err) {
-    console.error('Error in /users/leaderboard:', err);
+    console.error('GET /users/leaderboard: Error:', err.message);
     res.status(500).json({ message: 'Server error' });
   }
 });
