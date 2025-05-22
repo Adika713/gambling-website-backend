@@ -25,7 +25,7 @@ router.post('/register', async (req, res) => {
       }
     }
     user = new User({
-      discordId: discordId || null, // Explicitly set to null if undefined
+      discordId: discordId || null,
       discordName: username,
       email,
       password: await bcrypt.hash(password, 10),
@@ -90,6 +90,7 @@ router.get('/discord/callback', async (req, res) => {
     return res.status(400).json({ message: 'No code provided' });
   }
   try {
+    // Exchange code for access token
     const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', new URLSearchParams({
       client_id: process.env.DISCORD_CLIENT_ID,
       client_secret: process.env.DISCORD_CLIENT_SECRET,
@@ -98,44 +99,67 @@ router.get('/discord/callback', async (req, res) => {
       redirect_uri: 'https://gambling-website-backend.onrender.com/auth/discord/callback',
     }), {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    }).catch(err => {
+      console.error('Discord token exchange failed:', err.response?.data || err.message);
+      throw new Error(`Token exchange failed: ${err.response?.data?.error_description || err.message}`);
     });
 
     const { access_token } = tokenResponse.data;
     console.log('Discord callback: Access token received');
 
+    // Fetch Discord user data
     const userResponse = await axios.get('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${access_token}` },
+    }).catch(err => {
+      console.error('Discord user fetch failed:', err.response?.data || err.message);
+      throw new Error(`User fetch failed: ${err.response?.data?.error || err.message}`);
     });
     const { id: discordId, username, email, avatar } = userResponse.data;
     const discordAvatar = avatar ? `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png` : null;
     console.log('Discord callback: User data:', { discordId, username, email, discordAvatar });
 
+    // Find or create user
     let user = await User.findOne({ discordId });
+    const userEmail = email || `${discordId}@discord.placeholder`;
     if (!user) {
+      // Check for email conflict
+      const existingUser = await User.findOne({ email: userEmail });
+      if (existingUser) {
+        console.log('Discord callback: Email conflict:', userEmail);
+        return res.status(400).json({ message: `Email already in use: ${userEmail}` });
+      }
       user = new User({
         discordId,
         discordName: username,
         discordAvatar,
-        email: email || `${discordId}@discord.placeholder`,
+        email: userEmail,
         password: await bcrypt.hash(discordId, 10),
         balance: 0,
         gameHistory: [],
       });
       await user.save();
-      console.log('Discord callback: User created:', { _id: user._id, discordId, email });
+      console.log('Discord callback: User created:', { _id: user._id, discordId, email: userEmail });
     } else {
       user.discordName = username;
       user.discordAvatar = discordAvatar;
+      if (user.email !== userEmail) {
+        const emailCheck = await User.findOne({ email: userEmail });
+        if (emailCheck && emailCheck._id.toString() !== user._id.toString()) {
+          console.log('Discord callback: Email conflict on update:', userEmail);
+          return res.status(400).json({ message: `Email already in use: ${userEmail}` });
+        }
+        user.email = userEmail;
+      }
       await user.save();
-      console.log('Discord callback: User updated:', { _id: user._id, discordId, email });
+      console.log('Discord callback: User updated:', { _id: user._id, discordId, email: userEmail });
     }
 
     const token = jwt.sign({ id: user._id, discordId, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
     console.log('Discord callback: JWT generated for:', discordId);
     res.redirect(`https://gambling-website-frontend.vercel.app/profile?token=${token}`);
   } catch (err) {
-    console.error('Discord callback error:', err.response?.data || err.message, err.stack);
-    res.status(500).json({ message: 'Discord authentication failed' });
+    console.error('Discord callback error:', err.message, err.stack);
+    res.status(500).json({ message: `Discord authentication failed: ${err.message}` });
   }
 });
 
