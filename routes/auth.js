@@ -14,7 +14,7 @@ router.post('/register', async (req, res) => {
     }
     let user = await User.findOne({ email });
     if (user) {
-      console.log('Register: User already exists:', email);
+      console.log('Register: Email already in use:', email);
       return res.status(400).json({ message: 'Email already in use' });
     }
     if (discordId) {
@@ -25,7 +25,7 @@ router.post('/register', async (req, res) => {
       }
     }
     user = new User({
-      discordId,
+      discordId: discordId || null, // Explicitly set to null if undefined
       discordName: username,
       email,
       password: await bcrypt.hash(password, 10),
@@ -34,7 +34,7 @@ router.post('/register', async (req, res) => {
     });
     await user.save();
     console.log('Register: User created:', { _id: user._id, email, discordId });
-    const token = jwt.sign({ id: user._id, discordId, email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign({ id: user._id, discordId: user.discordId || null, email }, process.env.JWT_SECRET, { expiresIn: '1h' });
     res.json({ token });
   } catch (err) {
     console.error('Register error:', err.message, err.stack);
@@ -69,7 +69,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
     console.log('Login: User authenticated:', { _id: user._id, email, discordId: user.discordId });
-    const token = jwt.sign({ id: user._id, discordId: user.discordId, email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign({ id: user._id, discordId: user.discordId || null, email }, process.env.JWT_SECRET, { expiresIn: '1h' });
     res.json({ token });
   } catch (err) {
     console.error('Login error:', err.message, err.stack);
