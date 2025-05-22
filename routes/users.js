@@ -1,9 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
-const User = require('../models/User'); // Adjust path to your User model
+const User = require('../models/User');
 
-// Middleware to verify JWT
 const authMiddleware = (req, res, next) => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
   if (!token) {
@@ -21,7 +20,6 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// GET /users/me - Get current user
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     console.log('GET /users/me: Fetching user with ID:', req.user.id, 'or discordId:', req.user.discordId);
@@ -38,6 +36,8 @@ router.get('/me', authMiddleware, async (req, res) => {
     console.log('GET /users/me: User found:', { email: user.email, balance: user.balance });
     res.json({
       discordName: user.discordName,
+      discordId: user.discordId,
+      discordAvatar: user.discordAvatar,
       email: user.email,
       balance: user.balance,
       gameHistory: user.gameHistory || [],
@@ -48,7 +48,6 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
-// GET /users/leaderboard - Get leaderboard
 router.get('/leaderboard', async (req, res) => {
   try {
     const users = await User.find()

@@ -86,8 +86,9 @@ router.get('/discord/callback', async (req, res) => {
     const userResponse = await axios.get('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${access_token}` },
     });
-    const { id: discordId, username, email } = userResponse.data;
-    console.log('Discord callback: User data:', { discordId, username, email });
+    const { id: discordId, username, email, avatar } = userResponse.data;
+    const discordAvatar = avatar ? `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png` : null;
+    console.log('Discord callback: User data:', { discordId, username, email, discordAvatar });
 
     // Find or create user
     let user = await User.findOne({ discordId });
@@ -95,23 +96,27 @@ router.get('/discord/callback', async (req, res) => {
       user = new User({
         discordId,
         discordName: username,
+        discordAvatar,
         email: email || `${discordId}@discord.placeholder`,
-        password: await bcrypt.hash(discordId, 10), // Placeholder password
+        password: await bcrypt.hash(discordId, 10),
         balance: 0,
         gameHistory: [],
       });
       await user.save();
       console.log('Discord callback: User created:', { _id: user._id, discordId, email });
     } else {
-      console.log('Discord callback: User found:', { _id: user._id, discordId, email });
+      user.discordName = username;
+      user.discordAvatar = discordAvatar;
+      await user.save();
+      console.log('Discord callback: User updated:', { _id: user._id, discordId, email });
     }
 
     // Generate JWT
     const token = jwt.sign({ id: user._id, discordId, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
     console.log('Discord callback: JWT generated for:', discordId);
 
-    // Redirect to frontend with token
-    res.redirect(`https://gambling-website-frontend.vercel.app/login?token=${token}`);
+    // Redirect to frontend profile with token
+    res.redirect(`https://gambling-website-frontend.vercel.app/profile?token=${token}`);
   } catch (err) {
     console.error('Discord callback error:', err.response?.data || err.message);
     res.status(500).json({ message: 'Discord authentication failed' });
